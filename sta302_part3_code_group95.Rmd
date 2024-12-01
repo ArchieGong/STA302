@@ -1,0 +1,416 @@
+---
+title: "Proposal_Code"
+output: pdf_document
+---
+```{r}
+library(car)
+library(leaps)
+library(MASS)
+library(psych)
+```
+
+
+1. Clean Data
+```{r}
+# Read the dataset
+set.seed(10072499)
+data <- read.csv("/Users/davegong/Desktop/dasanshang/302 R/302part3/original_data_nba_final.csv")
+
+# Subset the data
+data <- data[, c("PTS", "Role", "Age", "FGA", "FT.", 
+                 "X2P.", "X3P.", "TOV", "PF")]
+
+# Remove rows with missing values (NA)
+data <- na.omit(data)
+
+# Create the Age_Category column
+data$Age_Category <- ifelse(data$Age < 27, "Pre-Peak Age", 
+                            ifelse(data$Age >= 27 & data$Age <= 29,
+                                   "Peak Age", "Post-Peak Age"))
+
+# It seems that R treat Age_Category and Role as character, convert character to factor
+data$Role <- factor(data$Role)
+data$Age_Category <- factor(data$Age_Category)
+
+
+data_exclude_age <- data[, c("PTS", "Role", "Age_Category", "FGA", "FT.", 
+                 "X2P.", "X3P.", "TOV", "PF")]
+
+s <- sample(1:1280,640,replace=F)
+train <- data_exclude_age[s,]
+test <- data_exclude_age[-s,]
+
+# B.3 Table of numerical summaries
+describe(train)
+summary(test)
+```
+
+```{r}
+hist(train$PTS)
+hist(test$PTS)
+```
+
+1. Extra: Check Skewed Variable
+```{r}
+# Create a 3x3 grid of plots
+par(mfrow = c(3, 3))
+
+# Create frequency vs. variable graphs for each variable
+variables <- c("PTS", "Role", "Age_Category", "FGA", "FT.", "X2P.", "X3P.", "TOV", "PF")
+
+for (variable in variables) {
+  if (is.numeric(train[, variable])) {
+    # Histogram for numerical variables
+    hist(train[, variable], main = paste("Frequency vs.", variable), 
+         xlab = variable, ylab = "Frequency")
+  } else {
+    # Barplot for categorical variables
+    barplot(table(train[, variable]), main = paste("Frequency vs.", variable), 
+            xlab = variable, ylab = "Frequency")
+  }
+}
+
+# Reset par() settings to default
+par(mfrow = c(1, 1))
+
+```
+
+2. Fit Multiple Linear Regression Model: Based on the common sense, and literature review, and predictors of interest
+```{r}
+# Fit the initial full multiple linear regression model
+model_full <- lm(train$PTS ~ Role + Age_Category + FGA + FT. + X2P. + X3P. + TOV + PF + FGA:Role, data = train)
+```
+
+3. Check Assumptions of full MLR Model:
+a. Residuals versus each predictor (scatterplot for numerical / boxplot for categorical) & Residual versus fitted values(scatterplot):
+```{r}
+# Calculate residuals
+residuals <- residuals(model_full)
+
+# Create a layout for separate plots
+layout(matrix(1:9, nrow = 3))  # Create a 2x3 grid of plots
+
+# Create a scatterplot of residuals versus fitted values
+plot(fitted(model_full), residuals,  main = "Residuals vs. Fitted", 
+     xlab = "Fitted Values", ylab = "Residuals")
+
+abline(h = 0, col = "red")  # Add a horizontal line at y = 0 for reference
+# Create scatterplots of residuals versus each predictor
+plot(residuals ~ train$FGA, main = "Field Goal Attempts \n Per Game", 
+     xlab = "FGA", ylab = "Residuals")
+plot(residuals ~ train$FT., main = "Free throw percentage", 
+     xlab = "FT.", ylab = "Residuals")
+plot(residuals ~ train$X2P., main = "Percentage on 2Pt Goal \n Per Game", 
+     xlab = "X2P.", ylab = "Residuals")
+plot(residuals ~ train$X3P., main = "Percentage on 3Pt Goal \n Per Game", 
+     xlab = "X3P.", ylab = "Residuals")
+plot(residuals ~ train$TOV, main = "Turnovers Per Game", 
+     xlab = "TOV", ylab = "Residuals")
+plot(residuals ~ train$PF, main = "Personal Fouls Per Game", 
+     xlab = "Role", ylab = "PF")
+
+# Create scatterplots of residuals versus each predictor
+boxplot(residuals ~ train$Role, main="Residual vs Role", 
+        xlab="Role", ylab="Residual")
+boxplot(residuals ~ train$Age_Category, main="Residual vs Age Category", 
+        xlab="Age Category", ylab="Residual")
+
+#There is no evidence of violation on the linearity, uncorrelated errors, and constant variance
+```
+b. Normal Quantile-Quantile (QQ) Plot:
+```{r}
+# Create a normal QQ plot of residuals
+qqnorm(residuals)
+qqline(residuals, col = "red")  # Add a reference line
+
+#There is no strong evidence of violation of Normality
+```
+
+4. Check additional Condition of MLR Model:
+a. Conditional Mean Response Condition (Linearity of the Mean Response):
+```{r}
+# Create a scatterplot of response vs. fitted values
+
+plot(x = fitted(model_full), y = train$PTS, main = "Response vs. Fitted", 
+     xlab = "Fitted Values", ylab = "Response")
+abline(a = 0, b = 1, col = "red") # diagonal line for reference
+
+#There is no evidence of violation on the Conditional Mean Response Condition
+```
+
+b. Conditional Mean Predictor Condition (Linearity among Predictors):
+```{r}
+# Create pairwise scatterplots of predictors
+pairs(train[, c("FGA", "FT.", "X2P.", "X3P.", "TOV", "PF", "Age_Category", "Role")])
+#There is no evidence of violation on the Conditional Mean Predictor Condition
+```
+
+```{r}
+#Check the multicollinearity of full model
+vif(model_full,type = 'predictor')
+
+#We can the variance inflation factor in front of "FGA" and "Role" is greater than 5
+#The full model is not a good model, and we decide not to use it.
+#Since we are doing model selection in the next step, we decide not to tackle this problem at this stage
+```
+
+```{r}
+summary(model_full)
+#F-statistic: p-value< 2.2e-16, so reject null and conclude significant linear relationship exists for at least one predictor.
+#We can observe that the p-value of the predictors "Role","Age_Category" and "X3P." close to and bigger than 0.05.
+#This is to say these predictors are not significant, but we will have more evidence and make further discussion when selecting
+#Together with the fact of multicollinearity of "FGA", we decide to not use the full size model, and so conduct model selection.
+```
+
+(1)We use the tool of 'all possible subsets'
+```{r}
+#install.packages("leaps")
+best <- regsubsets(PTS ~ Role + Age_Category + FGA + FT. + X2P. + X3P. + TOV + PF + FGA:Role, data=train, nbest = 1, nvmax=10)
+summary(best)
+subsets(best, statistic = "adjr2", legend=FALSE)
+
+#From comparing R2adj, we can easily delete the models of size 1-4. 
+#In the previous step, we have decided to not use the full model of size 10, as the presence of multicollinearity
+
+```
+
+```{r}
+model_1 <- lm(PTS ~   FGA, data=train)
+model_2 <- lm(PTS ~   FGA + X2P., data=train)
+model_3 <- lm(PTS ~   FGA + X2P. + TOV, data=train)
+model_4 <- lm(PTS ~   FGA + X2P. + TOV  + FGA:Role, data=train)
+model_5 <- lm(PTS ~   FGA + FT. + X2P. + TOV  + FGA:Role, data=train)
+model_6 <- lm(PTS ~   FGA + FT. + X2P. + X3P. + TOV + FGA:Role, data=train)
+model_7 <- lm(PTS ~   FGA + FT. + X2P. + X3P. + TOV + PF + FGA:Role, data=train)
+model_8 <- lm(PTS ~   Role + FGA + FT. + X2P. + X3P. + TOV + PF + FGA:Role, data=train)
+
+#"all possible subsets" only compare the RSS within the models of same size. This method does not compare the AIC, BIC and R2adj
+# We compare the "best" model of size 6-9
+
+```
+
+```{r}
+#As the meachism of 'all possible subset' is to compare the samlles RSS among the model of same size, we need to compare AIC, BIC, and R2adj
+
+select = function(model, n, model_name){
+  SSR <- sum(model$residuals^2)
+  Rsq_adj <- summary(model)$adj.r.squared
+  p <- length(model$coefficients) - 1
+  AIC <- n*log(SSR/n) + 2*p    
+  BIC <- n*log(SSR/n) + (p+2)*log(n)
+  res <- c(model_name,Rsq_adj, AIC, BIC)
+  names(res) <- c('model', "Rsq_adj", "AIC", "BIC")
+  return(res)
+}
+select(model_1, 640, "model_1")
+select(model_2, 640, "model_2")
+select(model_3, 640, "model_3")
+select(model_4, 640, "model_4")
+select(model_5, 640, "model_5")
+select(model_6, 640, "model_6")
+select(model_7, 640, "model_7")
+select(model_8, 640, "model_8")
+
+
+# With this table, Rsq_adj and AIC of this 5 models has little difference, but the model of size 5 has the smallest BIC, and the model of size 7 has the smallest AIC
+
+#Hence, we select the model_5 and model_7 by 'all possible selection'
+#model 5: PTS ~   FGA + FT. + X2P. + TOV  + FGA:Role
+#model 7: PTS ~   FGA + FT. + X2P. + X3P. + TOV + PF + FGA:Role
+```
+
+
+```{r}
+#Surprisingly, we find that f_model1 is a subset of f_model2, then we use the idea of Partial F test
+anova(model_5,model_7)
+#As p-value is less than 0.05, we have strong evidence to reject null hypothesis, and then select the f_model2
+```
+
+```{r}
+final_model <- model_7
+```
+
+
+Check additional Condition of final Model:
+a. Conditional Mean Response Condition (Linearity of the Mean Response):
+```{r}
+# Create a scatterplot of response vs. fitted values
+
+plot(x = fitted(model_full), y = train$PTS, main = "Response vs. Fitted", 
+     xlab = "Fitted Values", ylab = "Response")
+abline(a = 0, b = 1, col = "red") # diagonal line for reference
+
+#There is no evidence of violation on the Conditional Mean Response Condition
+```
+
+b. Conditional Mean Predictor Condition (Linearity among Predictors):
+```{r}
+# Create pairwise scatterplots of predictors
+pairs(train[, c("FGA", "FT.", "X2P.", "X3P.", "TOV", "PF")])
+#There is no evidence of violation on the Conditional Mean Predictor Condition
+```
+
+c. Check four assumptions for the final model
+```{r}
+# Calculate residuals
+residuals_final <- residuals(final_model)
+
+# Create a layout for separate plots
+layout(matrix(1:9, nrow = 3))  # Create a 2x3 grid of plots
+
+# Create a scatterplot of residuals versus fitted values
+plot(fitted(final_model), residuals_final,  main = "Residuals vs. Fitted", 
+     xlab = "Fitted Values", ylab = "Residuals")
+abline(h = 0, col = "red")  # Add a horizontal line at y = 0 for reference
+
+# Create scatterplots of residuals versus each predictor
+plot(residuals_final ~ train$FGA, main = "Field Goal Attempts \n Per Game", 
+     xlab = "FGA", ylab = "Residuals")
+plot(residuals_final ~ train$FT., main = "Free throw percentage", 
+     xlab = "FT.", ylab = "Residuals")
+plot(residuals_final ~ train$X2P., main = "Percentage on 2Pt Goal \n Per Game", 
+     xlab = "X2P.", ylab = "Residuals")
+plot(residuals_final ~ train$X3P., main = "Percentage on 3Pt Goal \n Per Game", 
+     xlab = "X3P.", ylab = "Residuals")
+plot(residuals_final ~ train$TOV, main = "Turnovers Per Game", 
+     xlab = "TOV", ylab = "Residuals")
+plot(residuals_final ~ train$PF, main = "Personal Fouls Per Game", 
+     xlab = "PF", ylab = "Residuals")
+
+# Create a normal QQ plot of residuals
+qqnorm(residuals_final)
+qqline(residuals_final, col = "red")  # Add a reference line
+#There is no evidence of violation on the linearity, uncorrelated errors, and constant variance
+```
+
+
+```{r}
+boxCox(final_model)
+#We take 'PTS' to the power of 0.75
+```
+
+```{r}
+transformed_final_model<-lm((train$PTS)**0.75 ~   FGA + FT. + X2P. + X3P. + TOV + PF +FGA:Role, data = train)
+```
+
+Then check the assumptions of the transformed final model again
+a. Conditional Mean Response Condition (Linearity of the Mean Response):
+```{r}
+# Create a scatterplot of response vs. fitted values
+
+plot(x = fitted(transformed_final_model), y = train$PTS, main = "Response vs. Fitted", 
+     xlab = "Fitted Values", ylab = "Response")
+
+#There is no evidence of violation on the Conditional Mean Response Condition
+```
+
+b. Conditional Mean Predictor Condition (Linearity among Predictors):
+```{r}
+# Create pairwise scatterplots of predictors
+pairs(train[, c("FGA", "FT.", "X2P.", "X3P.", "TOV", "PF")])
+#There is no evidence of violation on the Conditional Mean Predictor Condition
+```
+
+c. Check four assumptions for the final model
+```{r}
+# Calculate residuals
+residuals_transformed_final <- residuals(transformed_final_model)
+
+# Create a layout for separate plots
+layout(matrix(1:9, nrow = 3))  # Create a 2x3 grid of plots
+
+# Create a scatterplot of residuals versus fitted values
+plot(fitted(transformed_final_model), residuals_transformed_final,  main = "Residuals vs. Fitted", 
+     xlab = "Fitted Values", ylab = "Residuals")
+abline(h = 0, col = "red")  # Add a horizontal line at y = 0 for reference
+
+# Create scatterplots of residuals versus each predictor
+plot(residuals_transformed_final ~ train$FGA, main = "Field Goal Attempts \n Per Game", 
+     xlab = "FGA", ylab = "Residuals")
+plot(residuals_transformed_final ~ train$FT., main = "Free throw percentage", 
+     xlab = "FT.", ylab = "Residuals")
+plot(residuals_transformed_final ~ train$X2P., main = "Percentage on 2Pt Goal \n Per Game", 
+     xlab = "X2P.", ylab = "Residuals")
+plot(residuals_transformed_final ~ train$X3P., main = "Percentage on 3Pt Goal \n Per Game", 
+     xlab = "X3P.", ylab = "Residuals")
+plot(residuals_transformed_final ~ train$TOV, main = "Turnovers Per Game", 
+     xlab = "TOV", ylab = "Residuals")
+plot(residuals_transformed_final ~ train$PF, main = "Personal Fouls Per Game", 
+     xlab = "PF", ylab = "Residuals")
+
+# Create a normal QQ plot of residuals
+qqnorm(residuals_transformed_final)
+qqline(residuals_transformed_final, col = "red")  # Add a reference line
+#There is no evidence of violation on the linearity, uncorrelated errors, and constant variance
+```
+
+```{r}
+summary(transformed_final_model)
+```
+
+```{r}
+vif(transformed_final_model, type = 'predictor')
+#All VIFs is smaller than 5, so there is no evidence of multicollinearity
+```
+
+(1)compute the leverage, then compare to the cutoff value.
+(2)locate outliers, standardize residuals. Then compare to the cutoff value.
+(3)calculate the Cooks D, then compare to the cutoff value.
+```{r}
+n<-640
+p<-7
+all_influential <- function(p,n,model){
+  hii <- hatvalues(model)
+  cutoff_hii <- 2*((p+1)/n)
+  cat("(1)the leverage points are:")
+  print(table(which(hii > cutoff_hii)))
+  cat("The number of leverage points is", length(which(hii > cutoff_hii)))
+  
+  ri <- rstandard(model)
+  cat("\n\n(2)the outliers points are:")
+  print(table(which(ri > 4 | ri < -4)))
+  cat("The number of outliers points is", length(which(ri > 4 | ri < -4)))
+  
+  di <- cooks.distance(model)
+  cutoff_di <- qf(0.5, p+1, n-p-1)
+  cat("\n\n(3)the influential points on all fitted values are:")
+  print(which(di > cutoff_di))
+  cat("The number of influential points on all fitted values is",length(which(di > cutoff_di)))
+  
+  dffits <- dffits(model)
+  cutoff_dffits <- 2*sqrt((p+1)/n)
+  cat("\n\n(4)the influential points on own fitted values are:")
+  print(table(which(abs(dffits) > cutoff_dffits)))
+  cat("The number of influential points on all fitted values is", length(which(abs(dffits) > cutoff_dffits)))
+  cat("\n\n(5)")
+  dfbetas <- dfbetas(model)
+  cutoff_dfbetas <- 2/sqrt(n)
+  for (i in 1:8){
+    cat("\n")
+    cat("the influential points on b" , i-1, " are:")
+    print(table(which(abs(dfbetas[,i])>cutoff_dfbetas)))
+    l <- length(which(abs(dfbetas[,i])>cutoff_dfbetas))
+    cat("The number of influential points on this coefficient is ", l)
+    cat('\n')
+  }
+}
+  
+all_influential(p,n,transformed_final_model)
+```
+
+```{r}
+transformed_final_model<- lm((train$PTS)**0.75 ~  FGA + FT. + X2P. +X3P.+ TOV + PF + FGA:Role , data = train)
+final_model_test <- lm((test$PTS)**0.75 ~  FGA + FT. + X2P. +X3P.+ TOV + PF + FGA:Role , data = test)
+summary(transformed_final_model)
+summary(final_model_test)
+vif(transformed_final_model, type = 'predictor')
+vif(final_model_test,type = 'predictor')
+```
+
+```{r}
+all_influential(p,n,final_model_test)
+```
+
+
+
+
