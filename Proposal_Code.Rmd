@@ -1,0 +1,140 @@
+---
+title: "Proposal_Code"
+output: pdf_document
+---
+
+1. Clean Data
+```{r}
+# Read the dataset
+data <- read.csv("nba_final.csv")
+
+# Subset the data
+data <- data[, c("PTS", "Role", "Age", "FGA", "FT.", 
+                 "X2P.", "X3P.", "TOV", "PF")]
+
+# Remove rows with missing values (NA)
+data <- na.omit(data)
+
+# Create the Age_Category column
+data$Age_Category <- ifelse(data$Age < 27, "Pre-Peak Age", 
+                            ifelse(data$Age >= 27 & data$Age <= 29,
+                                   "Peak Age", "Post-Peak Age"))
+
+# It seems that R treat Age_Category and Role as character, convert character to factor
+data$Role <- factor(data$Role)
+data$Age_Category <- factor(data$Age_Category)
+
+# B.3 Table of numerical summaries
+summary(data)
+```
+1. Extra: Check Skewed Variable
+```{r}
+# Create a 3x3 grid of plots
+par(mfrow = c(3, 3))
+
+# Create frequency vs. variable graphs for each variable
+variables <- c("PTS", "Role", "Age", "FGA", "FT.", "X2P.", "X3P.", "TOV", "PF")
+
+for (variable in variables) {
+  if (is.numeric(data[, variable])) {
+    # Histogram for numerical variables
+    hist(data[, variable], main = paste("Frequency vs.", variable), 
+         xlab = variable, ylab = "Frequency")
+  } else {
+    # Barplot for categorical variables
+    barplot(table(data[, variable]), main = paste("Frequency vs.", variable), 
+            xlab = variable, ylab = "Frequency")
+  }
+}
+
+# Reset par() settings to default
+par(mfrow = c(1, 1))
+
+```
+
+2. Fit Multiple Linear Regression Model:
+```{r}
+# Fit the multiple linear regression model
+model <- lm(PTS ~ Role + Age_Category + FGA + FT. + X2P. + X3P. 
+            + TOV + PF + FGA:Role, data = data)
+
+variable_descriptions <- c("Intercept", 
+                           "Role: Front", 
+                           "Age at Pre-Peak",
+                           "Age at Post-Peak",
+                           "Field Goal Attempts Per Game", 
+                           "Free throw percentage", 
+                           "Field Goal Percentage on 2-Pt Field Goal Attempts Per Game", 
+                           "Field Goal Percentage on 3-Pt Field Goal Attempts Per Game", 
+                           "Turnovers Per Game", 
+                           "Personal Fouls Per Game", 
+                           "Interaction btw FGA and Front Role")
+# Print the model coefficients
+model
+# Print the coefficients with labels
+coefficients_with_labels <- cbind(Variable = variable_descriptions, 
+                                  Coefficient = coef(model))
+print(coefficients_with_labels)
+```
+3. Check Assumptions of MLR Model:
+a. Residuals versus each predictor (scatterplot for numerical / boxplot for categorical):
+```{r}
+# Calculate residuals
+residuals <- residuals(model)
+
+# Create a layout for separate plots
+layout(matrix(1:6, nrow = 2))  # Create a 2x3 grid of plots
+
+# Create scatterplots of residuals versus each predictor
+plot(residuals ~ data$FGA, main = "Field Goal Attempts \n Per Game", 
+     xlab = "FGA", ylab = "Residuals")
+plot(residuals ~ data$FT., main = "Free throw percentage", 
+     xlab = "FT.", ylab = "Residuals")
+plot(residuals ~ data$X2P., main = "Percentage on 2Pt Goal \n Per Game", 
+     xlab = "X2P.", ylab = "Residuals")
+plot(residuals ~ data$X3P., main = "Percentage on 3Pt Goal \n Per Game", 
+     xlab = "X3P.", ylab = "Residuals")
+plot(residuals ~ data$TOV, main = "Turnovers Per Game", 
+     xlab = "TOV", ylab = "Residuals")
+plot(residuals ~ data$PF, main = "Personal Fouls Per Game", 
+     xlab = "Role", ylab = "PF")
+
+# Create scatterplots of residuals versus each predictor
+boxplot(residuals ~ data$Role, main="Residual vs Role", 
+        xlab="Role", ylab="Residual")
+boxplot(residuals ~ data$Age_Category, main="Residual vs Age Category", 
+        xlab="Age Category", ylab="Residual")
+```
+b. Residual versus fitted values (scatterplot):
+```{r}
+# Create a scatterplot of residuals versus fitted values
+plot(fitted(model), residuals,  main = "Residuals vs. Fitted", 
+     xlab = "Fitted Values", ylab = "Residuals")
+abline(h = 0, col = "red")  # Add a horizontal line at y = 0 for reference
+
+```
+c. Normal Quantile-Quantile (QQ) Plot:
+```{r}
+# Create a normal QQ plot of residuals
+qqnorm(residuals)
+qqline(residuals, col = "red")  # Add a reference line
+```
+4. Check additional Condition of MLR Model:
+a. Conditional Mean Response Condition (Linearity of the Mean Response):
+```{r}
+# Create a scatterplot of response vs. fitted values
+plot(x = fitted(model), y = data$PTS, main = "Response vs. Fitted", 
+     xlab = "Fitted Values", ylab = "Response")
+abline(a = 0, b = 1, col = "red") # diagonal line for reference
+```
+b. Conditional Mean Predictor Condition (Linearity among Predictors):
+```{r}
+# Create pairwise scatterplots of predictors
+pairs(data[, c("FGA", "FT.", "X2P.", "X3P.", "TOV", "PF", "Age_Category", "Role")])
+```
+
+Export cleaned dataset
+```{r}
+write.csv(data, file = "cleaned_data.csv", row.names = FALSE)
+```
+
